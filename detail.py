@@ -25,8 +25,8 @@ def load_existing_json(file_path):
             return []
     return []
 
+# Extracts fragrance notes, avoiding duplicates and empty values
 async def extract_notes(driver, elements):
-    """ Extracts notes properly, avoiding duplicates and empty values """
     notes = set()  # Using a set to avoid duplicates
     for el in elements:
         text = await driver.execute_script(
@@ -41,11 +41,11 @@ async def main():
     links = load_existing_links("link.txt")  
     existing_data = load_existing_json(json_file)
 
+    # Extract existing fragrance names to avoid duplicates
+    existing_titles = {item["title"].strip().lower() for item in existing_data}
+
     # Find the last used ID and increment it
-    if existing_data:
-        last_id = max(item.get("id", 0) for item in existing_data)  # Get the highest existing ID
-    else:
-        last_id = 0  # Start at 1 if the file is empty
+    last_id = max((item.get("id", 0) for item in existing_data), default=0)
 
     # Configure the browser with a random User-Agent
     options = Options()
@@ -63,32 +63,35 @@ async def main():
             await driver.add_cookie(cookies)
             await asyncio.sleep(2)  # Wait to simulate human behavior
 
+            # Extract fragrance title
             try:
                 titleElement = await driver.find_element(By.CSS_SELECTOR, '#toptop > h1')
                 title = await driver.execute_script("return arguments[0].textContent;", titleElement)
             except:
-                title = "Title not found"
+                print(f"⚠️ Skipping: Could not retrieve title for {link}")
+                continue  # Skip this fragrance if the title is missing
 
+            # Skip if the fragrance already exists in the JSON
+            if title.lower() in existing_titles:
+                print(f"⚠️ Skipping: '{title}' already exists in the dataset.")
+                continue
+
+            # Extract brand name
             try:
                 brandElement = await driver.find_element(By.CSS_SELECTOR, "#main-content div:nth-child(2) > div:nth-child(1) > div:nth-child(2) > p > a > span")
                 brand = await brandElement.text
             except:
                 brand = "Unknown brand"
 
+            # Extract image URL
             try:
                 imageElement = await driver.find_element(By.CSS_SELECTOR, "img[itemprop='image']")
                 image_url = await driver.execute_script("return arguments[0].src;", imageElement)
             except:
-                image_url = "Image not found"
-
-            accords = await driver.find_elements(By.CSS_SELECTOR, ".accord-bar")
-
-            # Select the correct notes
-            topNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(4) div")
-            middleNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(6) div")
-            baseNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(8) div")
+                image_url = "No image available"
 
             # Extract accords
+            accords = await driver.find_elements(By.CSS_SELECTOR, ".accord-bar")
             accords_data = []
             for accord in accords:
                 text = await accord.text
@@ -97,7 +100,11 @@ async def main():
                 width = width_match.group(1) if width_match else "0"
                 accords_data.append({"name": text, "width": width})
 
-            # Properly extract notes
+            # Extract notes
+            topNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(4) div")
+            middleNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(6) div")
+            baseNotes = await driver.find_elements(By.CSS_SELECTOR, "#pyramid div:nth-child(8) div")
+
             top_notes_data = await extract_notes(driver, topNotes)
             middle_notes_data = await extract_notes(driver, middleNotes)
             base_notes_data = await extract_notes(driver, baseNotes)
@@ -108,8 +115,8 @@ async def main():
             # Store fragrance information in a dictionary
             fragrance_data = {
                 "id": last_id,
-                "title": title.strip(),
-                "brand": brand.strip(),
+                "title": title,
+                "brand": brand,
                 "image": image_url,
                 "accords": accords_data,
                 "top_notes": top_notes_data,
@@ -118,14 +125,15 @@ async def main():
                 "link": link
             }
 
-            # Add the new fragrance to the existing data
+            # Add new fragrance to the dataset
             existing_data.append(fragrance_data)
+            existing_titles.add(title.lower())  # Update the set to prevent duplicates
 
-            # Save to the JSON file
+            # Save updated data to JSON file
             with open(json_file, "w", encoding="utf-8") as file:
                 json.dump(existing_data, file, ensure_ascii=False, indent=4)
 
-            print(f"✅ Saved: {title.strip()} - {brand.strip()} (ID: {last_id})")
+            print(f"✅ Saved: {title} - {brand} (ID: {last_id})")
 
             await asyncio.sleep(random.randint(3, 5))  # Random pause to avoid detection
 
